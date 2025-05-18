@@ -1,402 +1,237 @@
-import random
-import json
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Telegram bot that scans images in groups for NSFW content and removes them.
+Main entry point of the application.
+"""
+
 import os
-import re
-import requests
-from datetime import datetime
+import sys
+import logging
+import tempfile
+from pathlib import Path
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from transformers import pipeline
+from handlers.gif import NSFWGifDetector
 
-# API Key های لازم
-GOOGLE_API_KEY = 'AIzaSyAjdQuSCp232VwQCsbvoPfccx0bsS95UDE'
-CUSTOM_SEARCH_ENGINE_ID = "e71bc15de1e78480f"
-BOT_USERNAME = "@hamalNS_bot"
+# Load environment variables from .env file
+load_dotenv()
 
-# مسیر فایل برای ذخیره داده‌ها
-MEMORY_FILE = "bot_memory.json"
-USER_DATA_FILE = "user_data.json"
-SEARCH_CACHE_FILE = "search_cache.json"
+# Add the project root to sys.path to allow importing from handlers
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# پاسخ‌های پیش‌فرض با لحن سرد و خاکی
-RESPONSES = {
-    "سلام": ["علیک", "چه خبر", "هستیم", "چطوری", "چخبرا", "بنال", "دم شما گرم، چخبر", "به مولا که اومدی"],
-    "خوبی": ["بد نیستم", "میگذره", "چاکریم", "هی، بگی نگی", "سر پام هنوز", "چی بگم واقعاً", "ما اینیم دیگه"],
-    "خداحافظ": ["برو به سلامت", "چاکریم", "یاعلی", "فعلاً", "گوربای", "بری برنگردی", "مخلصیم"],
-    # سایر پاسخ‌ها...
-}
+from handlers.photo import NSFWDetector
+from handlers.sticker import NSFWStickerDetector
 
-# تحلیل احساسات با استفاده از مدل Hugging Face
-sentiment_analyzer = pipeline("sentiment-analysis")
+# Set up logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# لود کردن داده‌های حافظه
-def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, 'r', encoding='utf-8') as file:
-            try:
-                return json.load(file)
-            except json.JSONDecodeError:
-                return {}
-    return {}
+# Initialize NSFW detector
+current_dir = os.path.dirname(os.path.abspath(__file__))
+nsfw_detector = NSFWDetector(current_dir)
+sticker_detector = NSFWStickerDetector(current_dir)
+gif_detector = NSFWGifDetector(current_dir)
 
-# لود کردن داده‌های کاربر
-def load_user_data():
-    if os.path.exists(USER_DATA_FILE):
-        with open(USER_DATA_FILE, 'r', encoding='utf-8') as file:
-            try:
-                return json.load(file)
-            except json.JSONDecodeError:
-                return {}
-    return {}
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /start is issued."""
+    await update.message.reply_text('سلام! من یک بات تشخیص و حذف محتوای نامناسب هستم.')
 
-# لود کردن کش جستجو
-def load_search_cache():
-    if os.path.exists(SEARCH_CACHE_FILE):
-        with open(SEARCH_CACHE_FILE, 'r', encoding='utf-8') as file:
-            try:
-                return json.load(file)
-            except json.JSONDecodeError:
-                return {}
-    return {}
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /help is issued."""
+    await update.message.reply_text('من عکس‌ها و استیکرهای ارسالی را بررسی می‌کنم و اگر محتوای نامناسب تشخیص داده شود، آن را حذف می‌کنم.')
 
-# ذخیره داده‌های حافظه
-def save_memory(memory_data):
-    with open(MEMORY_FILE, 'w', encoding='utf-8') as file:
-        json.dump(memory_data, file, ensure_ascii=False, indent=4)
-
-# ذخیره داده‌های کاربر
-def save_user_data(user_data):
-    with open(USER_DATA_FILE, 'w', encoding='utf-8') as file:
-        json.dump(user_data, file, ensure_ascii=False, indent=4)
-
-# ذخیره کش جستجو
-def save_search_cache(cache_data):
-    with open(SEARCH_CACHE_FILE, 'w', encoding='utf-8') as file:
-        json.dump(cache_data, file, ensure_ascii=False, indent=4)
-
-# جستجو در Google Custom Search API
-def search_info(query):
-    # بررسی کش برای کاهش درخواست‌های تکراری
-    cache = load_search_cache()
-    if query in cache:
-        return cache[query]
-    
-    url = f"https://www.googleapis.com/customsearch/v1?q={query}&key={GOOGLE_API_KEY}&cx={CUSTOM_SEARCH_ENGINE_ID}"
-    response = requests.get(url)
-    
-    if response.status_code == 200:
-        data = response.json()
+async def scan_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scan photos for NSFW content and delete if necessary."""
+    if update.message and update.message.photo:
+        # Get the largest photo available
+        photo = update.message.photo[-1]
+        
+        # Create a temp directory if it doesn't exist
+        temp_dir = os.path.join(current_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Create a temporary file path
+        temp_file = os.path.join(temp_dir, f"{update.message.message_id}.jpg")
+        
         try:
-            search_result = data['items'][0]['snippet']
-            cache[query] = search_result
-            save_search_cache(cache)
-            return search_result
-        except (IndexError, KeyError):
-            return "نتیجه‌ای پیدا نشد"
-    else:
-        return "خطا در جستجو"
+            # Download the photo
+            file = await context.bot.get_file(photo.file_id)
+            await file.download_to_drive(temp_file)
+            
+            logger.info(f"Downloaded photo to {temp_file}, scanning...")
+            
+            # Check if the image is NSFW
+            is_nsfw, nsfw_probability, details = nsfw_detector.is_nsfw(temp_file)
+            
+            if is_nsfw:
+                # Delete the message
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id
+                )
+                logger.info(f"Deleted NSFW image from chat {update.effective_chat.id}. Details: {details}")
+                
+                # Notify about deletion (optional)
+                user_name = update.message.from_user.first_name
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"⚠️ یک گور نامناسب از کاربر {user_name} پاک شد"
+                )
+            else:
+                logger.info(f"Image is safe. Details: {details}")
+        except Exception as e:
+            logger.error(f"Error processing image: {str(e)}")
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
-# تحلیل احساسات
-def analyze_sentiment(text):
-    sentiment = sentiment_analyzer(text)
-    return sentiment[0]['label'], sentiment[0]['score']
-
-# یادگیری پاسخ جدید با توانایی جستجو
-def learn_response(text, search=True):
-    memory = load_memory()
-    
-    # استخراج کلمات کلیدی
-    keywords = re.findall(r'\b\w+\b', text)
-    if not keywords:
-        keyword = "عمومی"
-    else:
-        keyword = keywords[0]
-    
-    # جستجوی اطلاعات آنلاین اگر فعال باشد
-    search_result = None
-    if search and len(text) > 5:
-        search_result = search_info(text)
-    
-    if keyword not in memory:
-        memory[keyword] = {"responses": [], "search_info": []}
-    
-    is_new = False
-    if text not in memory[keyword]["responses"]:
-        memory[keyword]["responses"].append(text)
-        is_new = True
-    
-    if search_result and search_result not in memory[keyword]["search_info"]:
-        memory[keyword]["search_info"].append(search_result)
-        is_new = True
-    
-    if is_new:
-        save_memory(memory)
-        return True, search_result
-    
-    return False, search_result
-
-# ذخیره تعاملات کاربر
-async def save_user_interaction(update: Update):
-    user_data = load_user_data()
-    user_id = str(update.message.from_user.id)
-    
-    if user_id not in user_data:
-        user_data[user_id] = {
-            "name": update.message.from_user.first_name,
-            "username": update.message.from_user.username,
-            "first_seen": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "messages": []
-        }
-    
-    # ثبت پیام
-    user_data[user_id]["messages"].append({
-        "text": update.message.text,
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    })
-    
-    # به روز رسانی آخرین بازدید
-    user_data[user_id]["last_seen"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    save_user_data(user_data)
-
-# دستور شروع
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "چطوری داش؟\n"
-        "من یه ربات ساده‌م. هر چی بگی یاد میگیرم.\n"
-        "اگه سوالی داری بگو، شاید جوابی داشته باشم.\n"
-        "برای دیدن قابلیت‌ها /help بزن."
-    )
-    await save_user_interaction(update)
-
-# دستور راهنما
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "ببین داداش اینا امکانات منه:\n\n"
-        "- یه چیزی بگو جوابتو میدم\n"
-        "- با /learn میتونی چیز جدید یادم بدی\n"
-        "- با /search میتونم برات دنبال اطلاعات بگردم\n"
-        "- با /stats آمار حرف زدنمون رو میبینی\n\n"
-        "تو گروه‌ها هم تگم کن میام"
-    )
-    await save_user_interaction(update)
-
-# دستور یادگیری
-async def learn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.replace("/learn", "").strip()
-    
-    if not text:
-        await update.message.reply_text("داداش بعد از /learn یه چیزی بنویس که یاد بگیرم")
-        return
-    
-    success, search_result = learn_response(text)
-    
-    if success:
-        if search_result:
-            await update.message.reply_text(f"گرفتم چی میگی. این‌جا هم یه چیزی پیدا کردم:\n{search_result}")
+async def scan_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scan stickers for NSFW content and delete if necessary."""
+    if update.message and update.message.sticker:
+        sticker = update.message.sticker
+        
+        # Create a temp directory if it doesn't exist
+        temp_dir = os.path.join(current_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Determine file extension based on sticker type
+        if sticker.is_video:
+            logger.info("Video sticker detected.")
+            ext = ".webm"
+        elif sticker.is_animated:
+            logger.info("Animated sticker detected.")
+            ext = ".tgs"
         else:
-            await update.message.reply_text("اوکی، گرفتم")
-    else:
-        await update.message.reply_text("اینو قبلاً شنیدم. یه چیز جدید بگو")
-    
-    await save_user_interaction(update)
-
-# دستور جستجو
-async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text.replace("/search", "").strip()
-    
-    if not query:
-        await update.message.reply_text("داداش بعد از /search یه چیزی بنویس که دنبالش بگردم")
-        return
-    
-    search_result = search_info(query)
-    await update.message.reply_text(f"این چیزیه که پیدا کردم:\n{search_result}")
-    await save_user_interaction(update)
-
-# دستور آمار
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_data = load_user_data()
-    user_id = str(update.message.from_user.id)
-    
-    if user_id in user_data:
-        message_count = len(user_data[user_id]["messages"])
-        first_seen = user_data[user_id]["first_seen"]
+            logger.info("Static sticker detected.")
+            ext = ".webp"
         
-        await update.message.reply_text(
-            f"آمار ما:\n\n"
-            f"- پیام‌های تو: {message_count}\n"
-            f"- از تاریخ: {first_seen}\n"
-            f"- کلمات یاد گرفته: {len(load_memory())}\n\n"
-            f"همینه که هست"
-        )
-    else:
-        await update.message.reply_text("هنوز آماری ندارم ازت")
-    
-    await save_user_interaction(update)
-
-# آیینه‌وار سازی متن
-def mirror_response(text):
-    responses = [
-        f"خودت میگی {text}",
-        f"حالا که گفتی {text}، خب که چی؟",
-        f"{text}؟ جدی؟",
-        f"چرا میگی {text}؟",
-        f"اینکه گفتی {text} خب باشه"
-    ]
-    return random.choice(responses)
-
-# پاسخ هوشمند
-async def smart_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ثبت اطلاعات تعامل
-    await save_user_interaction(update)
-    
-    # تشخیص نوع چت (گروه یا خصوصی)
-    chat_type = update.message.chat.type
-    text = update.message.text.lower()
-    
-    # حذف منشن در گروه‌ها (در صورتی که ربات منشن شود)
-    if chat_type in ["group", "supergroup"]:
-        if BOT_USERNAME.lower().replace("@", "") not in text.lower():
-            return  # اگر ربات منشن نشده در گروه، پاسخ نده
-        text = text.replace("@" + BOT_USERNAME.lower().replace("@", ""), "").strip()
-    
-    # بررسی پاسخ‌های از پیش تعیین شده
-    for keyword in RESPONSES:
-        if keyword in text:
-            await update.message.reply_text(random.choice(RESPONSES[keyword]))
-            return
-    
-    # بررسی پاسخ‌های یادگرفته شده
-    memory = load_memory()
-    matching_info = []
-    potential_responses = []
-    matching_keywords = []
-    
-    # اضافه کردن پاسخ‌های مرتبط
-    for keyword in memory:
-        if keyword in text:
-            matching_keywords.append(keyword)
+        # Create a temporary file path
+        temp_file = os.path.join(temp_dir, f"sticker_{update.message.message_id}{ext}")
+        
+        try:
+            # Download the sticker
+            file = await context.bot.get_file(sticker.file_id)
+            await file.download_to_drive(temp_file)
             
-            if memory[keyword]["responses"]:
-                potential_responses.extend(memory[keyword]["responses"])
+            logger.info(f"Downloaded sticker to {temp_file}, scanning...")
             
-            if memory[keyword]["search_info"]:
-                matching_info.extend(memory[keyword]["search_info"])
-    
-    # اگر کلمات کلیدی تطابق داشتند، اما پاسخی پیدا نشد
-    # بررسی کل حافظه برای یافتن پاسخ‌هایی که شامل متن ورودی هستند
-    if not potential_responses:
-        for keyword in memory:
-            for response in memory[keyword]["responses"]:
-                if text in response.lower():
-                    potential_responses.append(response)
-    
-    # یک لایه دیگر برای یافتن پاسخ‌های مرتبط
-    # بررسی کلمات موجود در متن ورودی
-    words = re.findall(r'\b\w+\b', text)
-    if not potential_responses:
-        for word in words:
-            if word in memory and len(word) > 2:  # کلمات با طول بیشتر از 2 را بررسی کن
-                if memory[word]["responses"]:
-                    potential_responses.extend(memory[word]["responses"])
-    
-    response_types = [
-        # 0: پاسخ آیینه‌وار
-        lambda: mirror_response(text),
-        
-        # 1: اطلاعات جستجو‌شده
-        lambda: f"یه چیزی شنیدم: {random.choice(matching_info)}" if matching_info else None,
-        
-        # 2: پاسخ از حافظه
-        lambda: random.choice(potential_responses) if potential_responses else None,
-        
-        # 3: جستجوی جدید
-        lambda: f"صبر کن ببینم... {search_info(text)}"
-    ]
-    
-    # اگر پاسخ‌های بالقوه داریم، اولویت بیشتری به آنها بدهیم
-    if potential_responses:
-        weights = [0.1, 0.2, 0.6, 0.1]  # اولویت بالاتر برای پاسخ‌های موجود در حافظه
-    else:
-        weights = [0.3, 0.2, 0.1, 0.4]  # اولویت بالاتر برای جستجو و پاسخ آیینه‌وار
-    
-    # انتخاب یک نوع پاسخ با وزن‌های مشخص شده
-    response_type = random.choices(range(len(response_types)), weights=weights, k=1)[0]
-    
-    # سعی در استفاده از نوع پاسخ انتخاب شده
-    response = response_types[response_type]()
-    
-    # اگر نوع پاسخ انتخاب شده موجود نیست، یکی دیگر را امتحان کن
-    if not response:
-        # اولویت بندی مجدد پاسخ‌ها
-        for i in range(len(response_types)):
-            if i != response_type:  # نوع پاسخ قبلی را دوباره امتحان نکن
-                fallback_response = response_types[i]()
-                if fallback_response:
-                    response = fallback_response
-                    break
-        
-        # اگر هیچ پاسخی پیدا نشد، از پاسخ‌های پیش‌فرض استفاده کن
-        if not response:
-            fallback_responses = [
-                "حوصله نداریما",
-                "یه چیز دیگه بگو",
-                "نفهمیدم چی گفتی",
-                "چی میگی داش؟",
-                "خب؟ ادامه بده",
-                "یجوری حرف بزن بفهمم"
-            ]
-            response = random.choice(fallback_responses)
-    
-    # یادگیری خودکار
-    learn_response(text, search=False)
-    
-    # برای اهداف دیباگ اگر مایل هستید
-    # print(f"متن: {text}, کلمات کلیدی یافت شده: {matching_keywords}, تعداد پاسخ‌های یافت شده: {len(potential_responses)}")
-    
-    await update.message.reply_text(response)
-    
-    # انتخاب یک نوع پاسخ به صورت تصادفی با وزن‌های خاص
-    weights = [0.2, 0.3, 0.3, 0.2]  # احتمال هر نوع پاسخ
-    response_type = random.choices(range(len(response_types)), weights=weights, k=1)[0]
-    
-    # سعی در استفاده از نوع پاسخ انتخاب شده
-    response = response_types[response_type]()
-    
-    # اگر نوع پاسخ انتخاب شده موجود نیست، یکی دیگر را امتحان کن
-    if not response:
-        fallback_responses = [
-            "حوصله نداریما",
-            "یه چیز دیگه بگو",
-            "نفهمیدم چی گفتی",
-            "چی میگی داش؟",
-            "خب؟ ادامه بده",
-            "یجوری حرف بزن بفهمم"
-        ]
-        response = random.choice(fallback_responses)
-    
-    # یادگیری خودکار
-    learn_response(text, search=False)
-    
-    await update.message.reply_text(response)
+            # Check if the sticker is NSFW
+            is_nsfw, nsfw_probability, details = sticker_detector.is_nsfw(temp_file)
+            
+            if is_nsfw:
+                # Delete the message
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id
+                )
+                logger.info(f"Deleted NSFW sticker from chat {update.effective_chat.id}. Details: {details}")
+                
+                # Notify about deletion (optional)
+                user_name = update.message.from_user.first_name
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"⚠️ یک گور نامناسب از کاربر {user_name} پاک شد. "
+                )
+            else:
+                logger.info(f"Sticker is safe. Details: {details}")
+        except Exception as e:
+            logger.error(f"Error processing sticker: {str(e)}")
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
-if __name__ == "__main__":
-    if not os.path.exists(MEMORY_FILE):
-        save_memory({})
-    if not os.path.exists(USER_DATA_FILE):
-        save_user_data({})
-    if not os.path.exists(SEARCH_CACHE_FILE):
-        save_search_cache({})
-    
-    app = Application.builder().token("7473433081:AAH1ISzqMI1l6t6n_H9_JYvVfpvXj-Lzvik").build()
-    
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("learn", learn_command))
-    app.add_handler(CommandHandler("search", search_command))
-    app.add_handler(CommandHandler("stats", stats_command))
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), smart_response))
-    
-    print("ربات در حال اجراست...")
-    app.run_polling()
+async def scan_animation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Scan animated GIFs and videos for NSFW content and delete if necessary."""
+    if update.message and update.message.animation:
+        animation = update.message.animation
+        
+        # Create a temp directory if it doesn't exist
+        temp_dir = os.path.join(current_dir, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Get the file extension from the mime type
+        mime_type = animation.mime_type
+        if mime_type == "video/mp4":
+            ext = ".mp4"
+        else:
+            ext = ".gif"
+        
+        # Create a temporary file path
+        temp_file = os.path.join(temp_dir, f"animation_{update.message.message_id}{ext}")
+        
+        try:
+            # Download the animation
+            file = await context.bot.get_file(animation.file_id)
+            await file.download_to_drive(temp_file)
+            
+            logger.info(f"Downloaded animation to {temp_file}, scanning...")
+            
+            # Check if the animation is NSFW
+            is_nsfw, nsfw_probability, details = gif_detector.is_nsfw(temp_file)
+            
+            if is_nsfw:
+                # Delete the message
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id
+                )
+                logger.info(f"Deleted NSFW animation from chat {update.effective_chat.id}. Details: {details}")
+                
+                # Notify about deletion (optional)
+                user_name = update.message.from_user.first_name
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text=f"⚠️ یک گور نامناسب از کاربر {user_name} پاک شد. "
+                )
+            else:
+                logger.info(f"Animation is safe. Details: {details}")
+        except Exception as e:
+            logger.error(f"Error processing animation: {str(e)}")
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
+def main() -> None:
+    """Start the bot."""
+    # Create the Application
+    token = os.environ.get("TELEGRAM_TOKEN")
+    
+    # Check if TELEGRAM_TOKEN is set
+    if not token:
+        print("Error: TELEGRAM_TOKEN environment variable not set!")
+        print("Please set your Telegram bot token in a .env file or environment variable")
+        sys.exit(1)
+        
+    print("Starting NSFW Telegram Bot...")
+    
+    application = Application.builder().token(token).build()
+
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+
+    # Add message handler for photos
+    application.add_handler(MessageHandler(filters.PHOTO, scan_photo))
+    
+    # Add message handler for stickers
+    application.add_handler(MessageHandler(filters.Sticker.ALL, scan_sticker))
+    
+    # Add message handler for animations
+    application.add_handler(MessageHandler(filters.ANIMATION, scan_animation))
+
+    # Start the Bot
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    logger.info("Bot started")
+
+if __name__ == '__main__':
+    main()
