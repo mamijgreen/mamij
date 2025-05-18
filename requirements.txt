@@ -1,7 +1,9 @@
-random
-json
-os
-re
-requests
-python-telegram-bot==20.3
+python-telegram-bot>=22.0
+python-dotenv
+torch
 transformers
+Pillow
+opencv-python
+numpy
+pathlib
+imageio
