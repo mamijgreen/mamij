@@ -1,1 +1,9 @@
-webdavclient3
+python-telegram-bot>=22.0
+python-dotenv
+torch==2.1.2+cpu
+transformers
+Pillow
+opencv-python
+numpy
+pathlib
+imageio
