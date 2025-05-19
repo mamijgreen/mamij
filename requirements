@@ -1,9 +1,1 @@
-python-telegram-bot>=22.0
-python-dotenv
-torch
-transformers
-Pillow
-opencv-python
-numpy
-pathlib
-imageio
+webdavclient3
