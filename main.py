@@ -1,49 +1,92 @@
-from nudenet import NudeDetector
-from PIL import Image
-import io
-import random
-import numpy as np
+import logging
+import os
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
 
-class NSFWGifDetector:
-    def __init__(self):
-        self.detector = NudeDetector()
+from photo import NSFWDetector
+from gif import NSFWGifDetector
+from sticker_static import NSFWStaticStickerDetector
+from sticker_animated import NSFWAnimatedStickerDetector
 
-    def is_nsfw(self, gif_bytes):
-        """
-        بررسی می‌کند آیا گیف نامناسب است یا خیر
-        این تابع 5 فریم تصادفی از گیف را بررسی می‌کند
-        """
-        try:
-            gif = Image.open(io.BytesIO(gif_bytes))
-            n_frames = getattr(gif, 'n_frames', 1)
-            frames_to_check = min(5, n_frames)
-            frame_indices = random.sample(range(n_frames), frames_to_check)
-            
-            nsfw_scores = []
-            
-            for frame_index in frame_indices:
-                gif.seek(frame_index)
-                frame = gif.convert('RGB')
-                frame_array = np.array(frame)
-                
-                # بررسی با nudenet
-                result = self.detector.detect(frame_array)
-                
-                # بررسی ساده رنگ پوست
-                skin_tone = np.array([220, 180, 140])
-                skin_pixels = np.sum(np.all(np.abs(frame_array - skin_tone) < 50, axis=-1))
-                skin_percentage = skin_pixels / (frame_array.shape[0] * frame_array.shape[1])
-                
-                # ترکیب نتایج
-                frame_score = max([item['score'] for item in result]) if result else 0
-                frame_score = max(frame_score, skin_percentage)
-                nsfw_scores.append(frame_score)
-            
-            avg_nsfw_score = np.mean(nsfw_scores)
-            is_nsfw = avg_nsfw_score > 0.5  # آستانه را می‌توانید تنظیم کنید
-            
-            return is_nsfw, avg_nsfw_score
-        
-        except Exception as e:
-            print(f"خطا در پردازش گیف: {e}")
-            return False, 0.0
+# لاگ‌برداری
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+TELEGRAM_BOT_TOKEN = "7473433081:AAGhwQ4ptu_5aLlxjAUGvXD8-RZP_WVDuiY"
+
+nsfw_detector = NSFWDetector()
+nsfw_gif_detector = NSFWGifDetector()
+nsfw_static_sticker_detector = NSFWStaticStickerDetector()
+nsfw_animated_sticker_detector = NSFWAnimatedStickerDetector()
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if update.message.photo:
+            photo = update.message.photo[-1]
+            photo_file = await photo.get_file()
+            photo_bytes = await photo_file.download_as_bytearray()
+
+            is_nsfw = nsfw_detector.is_nsfw(photo_bytes)
+            if is_nsfw:
+                await update.message.delete()
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ تصویر نامناسب حذف شد.")
+                logger.info("NSFW photo deleted.")
+    except Exception as e:
+        logger.error(f"Error in handle_photo: {e}")
+
+async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        if update.message.animation:
+            gif = update.message.animation
+            gif_file = await gif.get_file()
+            gif_path = "temp.gif"
+            await gif_file.download_to_drive(gif_path)
+
+            is_nsfw = nsfw_gif_detector.is_nsfw(gif_path)
+            os.remove(gif_path)
+
+            if is_nsfw:
+                await update.message.delete()
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ گیف نامناسب حذف شد.")
+                logger.info("NSFW gif deleted.")
+    except Exception as e:
+        logger.error(f"Error in handle_gif: {e}")
+
+async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        sticker = update.message.sticker
+        if sticker.is_animated or sticker.is_video:
+            file = await sticker.get_file()
+            temp_path = "temp_sticker.webm"
+            await file.download_to_drive(temp_path)
+
+            is_nsfw = nsfw_animated_sticker_detector.is_nsfw(temp_path)
+            os.remove(temp_path)
+        else:
+            file = await sticker.get_file()
+            sticker_bytes = await file.download_as_bytearray()
+            is_nsfw = nsfw_static_sticker_detector.is_nsfw(sticker_bytes)
+
+        if is_nsfw:
+            await update.message.delete()
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ استیکر نامناسب حذف شد.")
+            logger.info("NSFW sticker deleted.")
+    except Exception as e:
+        logger.error(f"Error in handle_sticker: {e}")
+
+def main():
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(MessageHandler(filters.ANIMATION, handle_gif))
+    application.add_handler(MessageHandler(filters.Sticker.ALL, handle_sticker))
+
+    logger.info("Bot started.")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
