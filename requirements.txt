@@ -1,11 +1,3 @@
-python-telegram-bot>=22.0
-python-dotenv
-torch --index-url https://download.pytorch.org/whl/cpu
-torchvision --index-url https://download.pytorch.org/whl/cpu
-torchaudio --index-url https://download.pytorch.org/whl/cpu
-transformers
-Pillow
-opencv-python
+python-telegram-bot
 numpy
-pathlib
-imageio
+Pillow
