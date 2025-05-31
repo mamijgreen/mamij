@@ -2,5 +2,5 @@ python-telegram-bot
 numpy
 Pillow
 imageio
-opencv-python
-libgl1
+opencv-python-headless
+
