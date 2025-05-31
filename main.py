@@ -13,7 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # توکن ربات تلگرام خود را اینجا قرار دهید
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN_HERE"
+TELEGRAM_BOT_TOKEN = "7473433081:AAGhwQ4ptu_5aLlxjAUGvXD8-RZP_WVDuiY"
 
 # نمونه‌ها
 photo_detector = PhotoNSFWDetector()
