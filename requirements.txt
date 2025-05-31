@@ -1,4 +1,4 @@
-python-telegram-bot==20.3
-numpy==1.24.3
-Pillow==9.5.0
+python-telegram-bot
+numpy
+Pillow
 moviepy==1.0.3
