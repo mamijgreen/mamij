@@ -1,8 +1,11 @@
 [phases.setup]
-packages = ["libgl1"]
+packages = ["libGL"]
 
 [phases.install]
 cmd = "pip install -r requirements.txt"
+
+[phases.start]
+cmd = "python main.py"
 
 [env]
 PYTHON_VERSION = "3.10"
