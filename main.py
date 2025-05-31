@@ -24,13 +24,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await photo.get_file()
         photo_bytes = await photo_file.download_as_bytearray()
         
-        is_nsfw = nsfw_detector.is_nsfw(photo_bytes)
+        is_nsfw, nsfw_score = nsfw_detector.is_nsfw(photo_bytes)
         
         if is_nsfw:
             await update.message.delete()
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="تصویر نامناسب حذف شد."
+                text=f"تصویر نامناسب با نمره {nsfw_score:.2f} حذف شد."
             )
 
 async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,13 +40,13 @@ async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
         gif_file = await gif.get_file()
         gif_bytes = await gif_file.download_as_bytearray()
         
-        is_nsfw = nsfw_gif_detector.is_nsfw(gif_bytes)
+        is_nsfw, nsfw_score = nsfw_gif_detector.is_nsfw(gif_bytes)
         
         if is_nsfw:
             await update.message.delete()
             await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="گیف نامناسب حذف شد."
+                text=f"گیف نامناسب با نمره {nsfw_score:.2f} حذف شد."
             )
 
 def main():
