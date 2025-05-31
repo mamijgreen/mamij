@@ -1,49 +1,60 @@
-from nudenet import NudeDetector
+# gif.py
+
+import numpy as np
 from PIL import Image
 import io
+import cv2
 import random
-import numpy as np
+
+class NSFWDetector:
+    def __init__(self):
+        pass
+
+    def is_nsfw(self, image_bytes):
+        image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        image_array = np.array(image)
+
+        skin_tone = np.array([220, 180, 140])  # رنگ پوست ساده
+        skin_pixels = np.sum(np.all(np.abs(image_array - skin_tone) < 50, axis=-1))
+        skin_percentage = skin_pixels / (image_array.shape[0] * image_array.shape[1])
+
+        return skin_percentage > 0.3
 
 class NSFWGifDetector:
     def __init__(self):
-        self.detector = NudeDetector()
+        self.detector = NSFWDetector()
 
-    def is_nsfw(self, gif_bytes):
-        """
-        بررسی می‌کند آیا گیف نامناسب است یا خیر
-        این تابع 5 فریم تصادفی از گیف را بررسی می‌کند
-        """
-        try:
-            gif = Image.open(io.BytesIO(gif_bytes))
-            n_frames = getattr(gif, 'n_frames', 1)
-            frames_to_check = min(5, n_frames)
-            frame_indices = random.sample(range(n_frames), frames_to_check)
-            
-            nsfw_scores = []
-            
-            for frame_index in frame_indices:
-                gif.seek(frame_index)
-                frame = gif.convert('RGB')
-                frame_array = np.array(frame)
-                
-                # بررسی با nudenet
-                result = self.detector.detect(frame_array)
-                
-                # بررسی ساده رنگ پوست
-                skin_tone = np.array([220, 180, 140])
-                skin_pixels = np.sum(np.all(np.abs(frame_array - skin_tone) < 50, axis=-1))
-                skin_percentage = skin_pixels / (frame_array.shape[0] * frame_array.shape[1])
-                
-                # ترکیب نتایج
-                frame_score = max([item['score'] for item in result]) if result else 0
-                frame_score = max(frame_score, skin_percentage)
-                nsfw_scores.append(frame_score)
-            
-            avg_nsfw_score = np.mean(nsfw_scores)
-            is_nsfw = avg_nsfw_score > 0.5  # آستانه را می‌توانید تنظیم کنید
-            
-            return is_nsfw, avg_nsfw_score
-        
-        except Exception as e:
-            print(f"خطا در پردازش گیف: {e}")
-            return False, 0.0
+    def extract_frames(self, video_path, num_frames=5):
+        cap = cv2.VideoCapture(video_path)
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if frame_count == 0:
+            return []
+
+        chosen_frames = sorted(random.sample(range(frame_count), min(num_frames, frame_count)))
+        results = []
+        current = 0
+
+        for i in range(frame_count):
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if current in chosen_frames:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(frame_rgb)
+                with io.BytesIO() as output:
+                    pil_img.save(output, format="JPEG")
+                    results.append(output.getvalue())
+            current += 1
+
+        cap.release()
+        return results
+
+    def is_nsfw(self, gif_path):
+        frames = self.extract_frames(gif_path)
+        if not frames:
+            return False
+
+        scores = [self.detector.is_nsfw(f) for f in frames]
+        score_ratio = sum(scores) / len(scores)
+        return score_ratio > 0.3
