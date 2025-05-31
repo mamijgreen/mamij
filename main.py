@@ -11,8 +11,7 @@ from sticker_animated import NSFWAnimatedStickerDetector
 # لاگ‌برداری
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[logging.FileHandler("bot.log"), logging.StreamHandler()]
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
