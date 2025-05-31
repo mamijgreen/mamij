@@ -14,13 +14,20 @@ class NSFWDetector:
         try:
             image = Image.open(io.BytesIO(image_bytes))
             image_array = np.array(image)
+            
+            # بررسی با nudenet
             result = self.detector.detect(image_array)
             
-            # اگر هر گونه شیء نامناسب تشخیص داده شود، تصویر را نامناسب در نظر می‌گیریم
-            is_nsfw = len(result) > 0
-            nsfw_score = max([item['score'] for item in result]) if result else 0
+            # بررسی ساده رنگ پوست
+            skin_tone = np.array([220, 180, 140])  # یک نمونه رنگ پوست
+            skin_pixels = np.sum(np.all(np.abs(image_array - skin_tone) < 50, axis=-1))
+            skin_percentage = skin_pixels / (image_array.shape[0] * image_array.shape[1])
             
-            return is_nsfw, nsfw_score
+            # ترکیب نتایج
+            nsfw_score = max([item['score'] for item in result]) if result else 0
+            is_nsfw = (nsfw_score > 0.8) or (skin_percentage > 0.5 and nsfw_score > 0.3)
+            
+            return is_nsfw, max(nsfw_score, skin_percentage)
         except Exception as e:
             print(f"خطا در پردازش تصویر: {e}")
             return False, 0.0
