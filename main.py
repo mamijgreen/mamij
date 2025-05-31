@@ -33,7 +33,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_nsfw = nsfw_detector.is_nsfw(photo_bytes)
             if is_nsfw:
                 await update.message.delete()
-                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ تصویر نامناسب حذف شد.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌گورپاک شد")
                 logger.info("NSFW photo deleted.")
     except Exception as e:
         logger.error(f"Error in handle_photo: {e}")
@@ -51,7 +51,7 @@ async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if is_nsfw:
                 await update.message.delete()
-                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ گیف نامناسب حذف شد.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌گورپاک شد")
                 logger.info("NSFW gif deleted.")
     except Exception as e:
         logger.error(f"Error in handle_gif: {e}")
@@ -73,7 +73,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if is_nsfw:
             await update.message.delete()
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ استیکر نامناسب حذف شد.")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌گورپاک شد")
             logger.info("NSFW sticker deleted.")
     except Exception as e:
         logger.error(f"Error in handle_sticker: {e}")
