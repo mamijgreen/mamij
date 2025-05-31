@@ -1,60 +1,49 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from photo import NSFWDetector
-from gif import NSFWGifDetector
-import logging
+from nudenet import NudeDetector
+from PIL import Image
+import io
+import random
+import numpy as np
 
-# توکن ربات تلگرام خود را اینجا قرار دهید
-TELEGRAM_BOT_TOKEN = "7473433081:AAGhwQ4ptu_5aLlxjAUGvXD8-RZP_WVDuiY"
+class NSFWGifDetector:
+    def __init__(self):
+        self.detector = NudeDetector()
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# ایجاد نمونه از کلاس‌های NSFWDetector و NSFWGifDetector
-nsfw_detector = NSFWDetector()
-nsfw_gif_detector = NSFWGifDetector()
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندل کردن عکس‌های ارسالی در گروه"""
-    if update.message.photo:
-        photo = update.message.photo[-1]
-        photo_file = await photo.get_file()
-        photo_bytes = await photo_file.download_as_bytearray()
+    def is_nsfw(self, gif_bytes):
+        """
+        بررسی می‌کند آیا گیف نامناسب است یا خیر
+        این تابع 5 فریم تصادفی از گیف را بررسی می‌کند
+        """
+        try:
+            gif = Image.open(io.BytesIO(gif_bytes))
+            n_frames = getattr(gif, 'n_frames', 1)
+            frames_to_check = min(5, n_frames)
+            frame_indices = random.sample(range(n_frames), frames_to_check)
+            
+            nsfw_scores = []
+            
+            for frame_index in frame_indices:
+                gif.seek(frame_index)
+                frame = gif.convert('RGB')
+                frame_array = np.array(frame)
+                
+                # بررسی با nudenet
+                result = self.detector.detect(frame_array)
+                
+                # بررسی ساده رنگ پوست
+                skin_tone = np.array([220, 180, 140])
+                skin_pixels = np.sum(np.all(np.abs(frame_array - skin_tone) < 50, axis=-1))
+                skin_percentage = skin_pixels / (frame_array.shape[0] * frame_array.shape[1])
+                
+                # ترکیب نتایج
+                frame_score = max([item['score'] for item in result]) if result else 0
+                frame_score = max(frame_score, skin_percentage)
+                nsfw_scores.append(frame_score)
+            
+            avg_nsfw_score = np.mean(nsfw_scores)
+            is_nsfw = avg_nsfw_score > 0.5  # آستانه را می‌توانید تنظیم کنید
+            
+            return is_nsfw, avg_nsfw_score
         
-        is_nsfw, nsfw_score = nsfw_detector.is_nsfw(photo_bytes)
-        
-        if is_nsfw:
-            await update.message.delete()
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"تصویر نامناسب با نمره {nsfw_score:.2f} حذف شد."
-            )
-
-async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """هندل کردن گیف‌های ارسالی در گروه"""
-    if update.message.animation:
-        gif = update.message.animation
-        gif_file = await gif.get_file()
-        gif_bytes = await gif_file.download_as_bytearray()
-        
-        is_nsfw, nsfw_score = nsfw_gif_detector.is_nsfw(gif_bytes)
-        
-        if is_nsfw:
-            await update.message.delete()
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=f"گیف نامناسب با نمره {nsfw_score:.2f} حذف شد."
-            )
-
-def main():
-    """تابع اصلی برای اجرای ربات"""
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    application.add_handler(MessageHandler(filters.ANIMATION, handle_gif))
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == '__main__':
-    main()
+        except Exception as e:
+            print(f"خطا در پردازش گیف: {e}")
+            return False, 0.0
