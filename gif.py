@@ -1,8 +1,6 @@
 import numpy as np
 from PIL import Image
 import io
-import random
-from moviepy.editor import VideoFileClip
 
 class NSFWGifDetector:
     def __init__(self):
@@ -15,32 +13,31 @@ class NSFWGifDetector:
         بررسی می‌کند آیا گیف نامناسب است یا خیر
         این تابع 5 فریم تصادفی از گیف را بررسی می‌کند
         """
-        # تبدیل بایت‌های گیف به یک فایل موقت
-        with io.BytesIO(gif_bytes) as gif_file:
-            # استفاده از moviepy برای خواندن گیف
-            clip = VideoFileClip(gif_file.name)
-            
-            # انتخاب 5 فریم تصادفی
-            total_frames = int(clip.fps * clip.duration)
-            random_frames = random.sample(range(total_frames), min(5, total_frames))
-            
-            for frame_num in random_frames:
-                # گرفتن فریم به عنوان یک آرایه numpy
-                frame = clip.get_frame(frame_num / clip.fps)
+        try:
+            # تبدیل بایت‌های گیف به یک شیء Image
+            with Image.open(io.BytesIO(gif_bytes)) as gif:
+                # تعداد کل فریم‌ها
+                n_frames = getattr(gif, "n_frames", 1)
                 
-                # تبدیل فریم به تصویر PIL
-                image = Image.fromarray(frame)
+                # انتخاب 5 فریم تصادفی (یا کمتر اگر گیف کمتر از 5 فریم دارد)
+                frames_to_check = min(5, n_frames)
+                frame_indices = np.random.choice(n_frames, frames_to_check, replace=False)
                 
-                # بررسی ساده رنگ پوست
-                image_array = np.array(image)
-                skin_tone = np.array([220, 180, 140])  # یک نمونه رنگ پوست
-                skin_pixels = np.sum(np.all(np.abs(image_array - skin_tone) < 50, axis=-1))
-                skin_percentage = skin_pixels / (image_array.shape[0] * image_array.shape[1])
-                
-                # اگر بیش از 30% تصویر شبیه رنگ پوست باشد، آن را نامناسب در نظر می‌گیریم
-                if skin_percentage > 0.3:
-                    clip.close()
-                    return True
+                for frame_index in frame_indices:
+                    gif.seek(frame_index)
+                    frame = gif.convert('RGB')
+                    
+                    # بررسی ساده رنگ پوست
+                    image_array = np.array(frame)
+                    skin_tone = np.array([220, 180, 140])  # یک نمونه رنگ پوست
+                    skin_pixels = np.sum(np.all(np.abs(image_array - skin_tone) < 50, axis=-1))
+                    skin_percentage = skin_pixels / (image_array.shape[0] * image_array.shape[1])
+                    
+                    # اگر بیش از 30% تصویر شبیه رنگ پوست باشد، آن را نامناسب در نظر می‌گیریم
+                    if skin_percentage > 0.3:
+                        return True
             
-            clip.close()
+            return False
+        except Exception as e:
+            print(f"خطا در پردازش گیف: {e}")
             return False
