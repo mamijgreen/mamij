@@ -15,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TELEGRAM_BOT_TOKEN = "7473433081:AAGhwQ4ptu_5aLlxjAUGvXD8-RZP_WVDuiY"
+TELEGRAM_BOT_TOKEN = "7619620211:AAGY8KCvl5wiP0zhamEKYOmAUmnUzNYasB8"
 
 nsfw_detector = NSFWDetector()
 nsfw_gif_detector = NSFWGifDetector()
@@ -32,7 +32,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             is_nsfw = nsfw_detector.is_nsfw(photo_bytes)
             if is_nsfw:
                 await update.message.delete()
-                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ تصویر نامناسب حذف شد.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌گورپاک شد")
                 logger.info("NSFW photo deleted.")
     except Exception as e:
         logger.error(f"Error in handle_photo: {e}")
@@ -50,7 +50,7 @@ async def handle_gif(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if is_nsfw:
                 await update.message.delete()
-                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ گیف نامناسب حذف شد.")
+                await context.bot.send_message(chat_id=update.effective_chat.id, text="❌گورپاک شد")
                 logger.info("NSFW gif deleted.")
     except Exception as e:
         logger.error(f"Error in handle_gif: {e}")
@@ -72,7 +72,7 @@ async def handle_sticker(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if is_nsfw:
             await update.message.delete()
-            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌ استیکر نامناسب حذف شد.")
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="❌گورپاک شد")
             logger.info("NSFW sticker deleted.")
     except Exception as e:
         logger.error(f"Error in handle_sticker: {e}")
