@@ -1,7 +1,7 @@
 import imageio
 import io
 
-class AnimatedStickerNSFWDetector:
+class NSFWAnimatedStickerDetector:
     def __init__(self):
         pass
 
