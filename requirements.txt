@@ -4,6 +4,6 @@ Pillow
 imageio
 opencv-python-headless
 imageio[ffmpeg]
-torch==1.13.1+cpu
-torchvision==0.14.1+cpu
+torch==2.2.0
+torchvision==0.17.0
 requests
